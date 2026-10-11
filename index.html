@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<!--
+  Circle of Fifths Trainer · v0.1.0 · 2026-10-10
+  Explore mode: circle of fifths (major keys, signature counts, relative minors),
+  linked grand staff, Order of Sharps / Flats, step-by-step "Build it".
+  Quizzes arrive in v0.2.0.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circle of Fifths Trainer</title>
+
+<!-- Text fonts (display serif + mono labels), same pairing as the other trainers -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+  /* ------------------------------------------------------------------
+     MUSIC FONTS
+     Bravura      = notation glyphs on the grand staff (clefs, brace, accidentals)
+     Bravura Text = the same symbols, but sized to sit inside ordinary text
+                    (key names like "F#m", the order lists, the counts)
+     Both are SIL Open Font License, loaded from jsDelivr's mirror of
+     Steinberg's GitHub repo. Pinned to release 1.392 so they never change
+     underneath us.
+     ------------------------------------------------------------------ */
+  @font-face {
+    font-family: "Bravura";
+    src: url("https://cdn.jsdelivr.net/gh/steinbergmedia/bravura@bravura-1.392/redist/woff/Bravura.woff2") format("woff2");
+    font-display: block;
+  }
+  @font-face {
+    font-family: "Bravura Text";
+    src: url("https://cdn.jsdelivr.net/gh/steinbergmedia/bravura@bravura-1.392/redist/woff/BravuraText.woff2") format("woff2");
+    font-display: block;
+  }
+
+  /* ------------------------------------------------------------------
+     DESIGN TOKENS — change a color here and it changes everywhere
+     ------------------------------------------------------------------ */
+  :root {
+    --bg: #14110f;            /* page background */
+    --panel: #1a1a1a;         /* cards / control bar */
+    --ring-major: #241e19;    /* outer ring segments */
+    --ring-sig: #1d1814;      /* signature-count ring */
+    --ring-minor: #2a231d;    /* inner ring segments */
+    --ring-hover: #33291f;
+    --related: #3d3122;       /* other parts of the selected key */
+    --line: #3a3128;          /* hairlines */
+    --text: #ece4d6;          /* main text  (~14:1 on --bg) */
+    --muted: #a69a88;         /* secondary text (~6.9:1 on --bg) */
+    --brass: #c9a96e;
+    --brass-bright: #e8c891;
+    --paper: #f6f1e7;         /* staff card — real sheet music is dark ink on light paper */
+    --ink: #1b1712;
+    --ink-accent: #7a531a;    /* newest accidental while building (~6.3:1 on --paper) */
+    --focus: #e8c891;
+    --serif: "Fraunces", Georgia, serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--serif);
+    line-height: 1.5;
+  }
+
+  /* Screen-reader-only text: hidden visually, still read aloud */
+  .sr-only {
+    position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* An accidental drawn with Bravura Text. The glyph itself is hidden from
+     screen readers (it's a private-use character); spoken text sits next to it. */
+  .acc { font-family: "Bravura Text"; font-size: 0.95em; font-weight: normal; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 40px; }
+
+  header h1 {
+    font-weight: 600; font-size: clamp(1.6rem, 3vw, 2.2rem);
+    margin: 0 0 4px; color: var(--brass-bright); letter-spacing: 0.01em;
+  }
+  header p { margin: 0; color: var(--muted); font-size: 1rem; }
+
+  /* ---------------- control bar ---------------- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center;
+    margin: 20px 0 18px; padding: 12px 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .control-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .control-label {
+    font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin-right: 4px;
+  }
+
+  button {
+    font: inherit; color: inherit; cursor: pointer;
+  }
+  /* Toggle buttons: aria-pressed carries the on/off state for screen readers,
+     and the check mark / text carries it visually (never color alone). */
+  .toggle {
+    font-family: var(--mono); font-size: 0.85rem;
+    background: transparent; border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 12px; min-height: 36px; color: var(--muted);
+  }
+  .toggle[aria-pressed="true"] {
+    background: var(--brass); border-color: var(--brass); color: var(--bg);
+  }
+  .toggle .state::before { content: "○ "; }
+  .toggle[aria-pressed="true"] .state::before { content: "● "; }
+
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+  .font-warning {
+    display: none; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--brass); color: var(--brass-bright); font-size: 0.95rem;
+  }
+  .font-warning.show { display: block; }
+
+  /* ---------------- main layout: circle left, staff column right ---------------- */
+  .layout {
+    display: grid; gap: 28px;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* ---------------- the circle ---------------- */
+  .circle-box { width: 100%; max-width: 620px; margin: 0 auto; }
+  #circle { width: 100%; height: auto; display: block; touch-action: manipulation; }
+
+  .seg path { stroke: var(--bg); stroke-width: 2; transition: fill 120ms; }
+  .seg { cursor: pointer; outline: none; }
+  .seg.r-major path { fill: var(--ring-major); }
+  .seg.r-sig   path { fill: var(--ring-sig); }
+  .seg.r-minor path { fill: var(--ring-minor); }
+  .seg:hover path   { fill: var(--ring-hover); }
+  .seg.is-related path { fill: var(--related); }
+  .seg.is-selected path { fill: var(--brass); }
+
+  .seg text { pointer-events: none; fill: var(--text); text-anchor: middle; }
+  .seg.r-major text { font-family: var(--serif); font-weight: 600; }
+  .seg.r-minor text { font-family: var(--serif); }
+  .seg.r-sig   text { font-family: var(--mono); fill: var(--muted); }
+  .seg.is-related text { fill: var(--brass-bright); }
+  .seg.is-selected text { fill: var(--bg); }
+
+  /* Keyboard focus ring drawn on the segment's own outline */
+  .seg:focus-visible path { stroke: var(--focus); stroke-width: 4; }
+
+  .center-title { font-family: var(--serif); font-weight: 600; fill: var(--brass-bright); text-anchor: middle; }
+  .center-sub   { font-family: var(--mono); fill: var(--muted); text-anchor: middle; }
+
+  .hint { color: var(--muted); font-size: 0.9rem; text-align: center; margin: 10px 0 0; }
+  .hint kbd {
+    font-family: var(--mono); font-size: 0.8rem; border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 5px;
+  }
+
+  /* ---------------- list view (table alternative to the circle) ---------------- */
+  .list-box { display: none; }
+  .show-list .list-box { display: block; }
+  .show-list .circle-box { display: none; }
+  table.keys { width: 100%; border-collapse: collapse; font-size: 1.05rem; }
+  table.keys caption {
+    text-align: left; color: var(--muted); font-size: 0.9rem; padding-bottom: 8px;
+  }
+  table.keys th, table.keys td {
+    border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left;
+  }
+  table.keys th {
+    font-family: var(--mono); font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); font-weight: 400;
+  }
+  table.keys button {
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    padding: 6px 10px; min-height: 36px; text-align: left; width: 100%;
+  }
+  table.keys button:hover { border-color: var(--line); }
+  table.keys button[aria-pressed="true"] { background: var(--brass); color: var(--bg); }
+  table.keys td.sig button { font-family: var(--mono); font-size: 0.95rem; }
+
+  /* ---------------- right column: order lists + grand staff ---------------- */
+  .side { display: flex; flex-direction: column; gap: 18px; }
+
+  .orders { display: grid; gap: 12px; }
+  .order h2 {
+    font-family: var(--mono); font-size: 0.78rem; font-weight: 400; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin: 0 0 6px;
+  }
+  .order ol { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; }
+  .order li {
+    min-width: 46px; text-align: center; padding: 4px 8px; border-radius: 6px;
+    border: 1px solid var(--line); color: var(--muted);
+    font-family: var(--serif); font-size: 1.15rem;
+  }
+  /* Accidentals in the current key: filled, plus a small marker underneath
+     so "active" isn't shown by color alone. */
+  .order li.on {
+    background: var(--brass); border-color: var(--brass); color: var(--bg); font-weight: 600;
+    box-shadow: inset 0 -3px 0 var(--bg);
+  }
+  .order li.newest { outline: 2px solid var(--brass-bright); outline-offset: 2px; }
+
+  .staff-card {
+    background: var(--paper); color: var(--ink); border-radius: 10px; padding: 14px 14px 10px;
+  }
+  .staff-caption {
+    font-family: var(--serif); font-size: 1.1rem; margin: 0 0 4px; min-height: 1.6em; color: var(--ink);
+  }
+  .staff-caption .sub { font-family: var(--mono); font-size: 0.85rem; color: #5a5046; display: block; }
+  #staff { width: 100%; height: auto; display: block; }
+  #staff .staff-line { stroke: var(--ink); stroke-width: 1.1; }
+  #staff .system-line { stroke: var(--ink); stroke-width: 1.4; }
+  #staff .glyph { font-family: "Bravura"; fill: var(--ink); }
+  #staff .glyph.newest { fill: var(--ink-accent); }
+
+  .build-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+  .btn {
+    font-family: var(--mono); font-size: 0.85rem; min-height: 38px; padding: 6px 14px;
+    border-radius: 8px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+  }
+  .btn.secondary { background: transparent; color: var(--ink); }
+  .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+  .staff-card :focus-visible { outline-color: var(--ink-accent); }
+  .build-status { font-family: var(--mono); font-size: 0.85rem; color: #5a5046; }
+
+  footer {
+    margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 0.82rem; font-family: var(--mono);
+  }
+  footer p { margin: 4px 0; }
+  footer a { color: var(--brass); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Circle of Fifths Trainer</h1>
+    <p>Click a major key, a minor key, or a sharp/flat count to see its key signature on the grand staff.</p>
+  </header>
+
+  <!-- Shown only if the Bravura music fonts fail to load (offline, blocked CDN) -->
+  <p class="font-warning" id="font-warning" role="status">
+    The music symbol font didn't load, so sharps, flats and clefs may show as empty boxes.
+    Check your internet connection and reload the page.
+  </p>
+
+  <!-- ===================== CONTROL BAR ===================== -->
+  <div class="controls" role="group" aria-label="Display options">
+    <div class="control-group">
+      <span class="control-label" id="show-label">Show</span>
+      <button class="toggle" id="tg-major" aria-pressed="true" aria-describedby="show-label">
+        <span class="state"></span>Major keys</button>
+      <button class="toggle" id="tg-minor" aria-pressed="true" aria-describedby="show-label">
+        <span class="state"></span>Minor keys</button>
+    </div>
+    <div class="control-group">
+      <span class="control-label" id="view-label">View</span>
+      <button class="toggle" id="vw-circle" aria-pressed="true" aria-describedby="view-label">
+        <span class="state"></span>Circle</button>
+      <button class="toggle" id="vw-list" aria-pressed="false" aria-describedby="view-label">
+        <span class="state"></span>List</button>
+    </div>
+    <div class="control-group">
+      <span class="control-label" id="audio-label">Sound</span>
+      <button class="toggle" id="tg-audio" aria-pressed="true" aria-describedby="audio-label">
+        <span class="state"></span>Audio</button>
+    </div>
+  </div>
+
+  <!-- Announcements for screen readers ("D major selected, 2 sharps...") -->
+  <p class="sr-only" id="announcer" aria-live="polite"></p>
+
+  <!-- ===================== MAIN LAYOUT ===================== -->
+  <main class="layout" id="layout">
+
+    <!-- LEFT: the circle (or the list view) -->
+    <section aria-labelledby="circle-heading">
+      <h2 class="sr-only" id="circle-heading">Keys</h2>
+
+      <div class="circle-box">
+        <!-- The circle is built by JavaScript (see buildCircle below) -->
+        <svg id="circle" viewBox="0 0 600 600" role="group"
+             aria-label="Circle of fifths. Arrow keys: left and right move around the circle, up and down move between major keys, signature counts and minor keys. Enter or Space selects."></svg>
+        <p class="hint">Keyboard: <kbd>←</kbd> <kbd>→</kbd> around the circle ·
+          <kbd>↑</kbd> <kbd>↓</kbd> between rings · <kbd>Enter</kbd> selects</p>
+      </div>
+
+      <div class="list-box">
+        <table class="keys" id="key-table">
+          <caption>All 15 keys in circle order, starting at C and moving clockwise (adding sharps), then the flat keys.</caption>
+          <thead><tr><th scope="col">Major key</th><th scope="col">Key signature</th><th scope="col">Relative minor</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- RIGHT: order lists above the grand staff -->
+    <section class="side" aria-labelledby="sig-heading">
+      <h2 class="sr-only" id="sig-heading">Key signature</h2>
+
+      <div class="orders">
+        <div class="order">
+          <h2 id="sharps-heading">Order of Sharps</h2>
+          <ol id="order-sharps" aria-labelledby="sharps-heading"></ol>
+        </div>
+        <div class="order">
+          <h2 id="flats-heading">Order of Flats</h2>
+          <ol id="order-flats" aria-labelledby="flats-heading"></ol>
+        </div>
+      </div>
+
+      <div class="staff-card">
+        <p class="staff-caption" id="staff-caption"></p>
+        <svg id="staff" viewBox="0 0 274 252" role="img" aria-labelledby="staff-desc"></svg>
+        <p class="sr-only" id="staff-desc"></p>
+
+        <div class="build-row">
+          <button class="btn" id="btn-build">Build it step by step</button>
+          <button class="btn secondary" id="btn-showall" hidden>Show all</button>
+          <span class="build-status" id="build-status" aria-live="polite"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Circle of Fifths Trainer · v0.1.0</p>
+    <p>Music font: <a href="https://github.com/steinbergmedia/bravura">Bravura and Bravura Text</a> by Steinberg Media Technologies, SIL Open Font License 1.1.</p>
+    <p>Audio: <a href="https://tonejs.github.io/">Tone.js</a> (MIT License) with the
+      <a href="https://archive.org/details/SalamanderGrandPianoV3">Salamander Grand Piano V3</a> samples by Alexander Holm, CC BY 3.0.</p>
+  </footer>
+</div>
+
+<!-- Tone.js for the piano sound. If it fails to load, everything else still works. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. MUSIC DATA
+   Everything the app knows about keys lives here. The rest of the code
+   just draws and reacts to this data.
+   ===================================================================== */
+
+// SMuFL code points (the standard numbering for music symbols in Bravura)
+const GLYPH = {
+  sharp: "",
+  flat:  "",
+  gClef: "",
+  fClef: "",
+  brace: "",
+};
+
+// The orders of sharps and flats (letters only)
+const SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"];
+const FLAT_ORDER  = ["B", "E", "A", "D", "G", "C", "F"];
+
+// Each key: major tonic, relative minor tonic, accidental type and count.
+// acc: +1 sharp, -1 flat, 0 natural.
+function key(majL, majA, minL, minA, type, count) {
+  return { major: { letter: majL, acc: majA }, minor: { letter: minL, acc: minA }, type, count };
+}
+
+// 12 slots, clockwise from the top. Slots 5, 6 and 7 are the enharmonic ones,
+// so they hold two keys: [sharp spelling, flat spelling].
+const SLOTS = [
+  [key("C", 0, "A", 0, "none", 0)],
+  [key("G", 0, "E", 0, "sharp", 1)],
+  [key("D", 0, "B", 0, "sharp", 2)],
+  [key("A", 0, "F", 1, "sharp", 3)],
+  [key("E", 0, "C", 1, "sharp", 4)],
+  [key("B", 0, "G", 1, "sharp", 5), key("C", -1, "A", -1, "flat", 7)],
+  [key("F", 1, "D", 1, "sharp", 6), key("G", -1, "E", -1, "flat", 6)],
+  [key("C", 1, "A", 1, "sharp", 7), key("D", -1, "B", -1, "flat", 5)],
+  [key("A", -1, "F", 0, "flat", 4)],
+  [key("E", -1, "C", 0, "flat", 3)],
+  [key("B", -1, "G", 0, "flat", 2)],
+  [key("F", 0, "D", 0, "flat", 1)],
+];
+
+// The letters a key signature alters, in order (e.g. D major -> ["F","C"])
+function sigLetters(k) {
+  if (k.type === "sharp") return SHARP_ORDER.slice(0, k.count);
+  if (k.type === "flat")  return FLAT_ORDER.slice(0, k.count);
+  return [];
+}
+
+/* ---------- names: one version for the eye, one for the ear ---------- */
+
+// Spoken / plain-text name, e.g. "F sharp"
+function spokenName(n) {
+  return n.letter + (n.acc === 1 ? " sharp" : n.acc === -1 ? " flat" : "");
+}
+// Spoken signature, e.g. "2 sharps", "1 flat", "no sharps or flats"
+function spokenCount(k) {
+  if (k.count === 0) return "no sharps or flats";
+  return k.count + " " + k.type + (k.count === 1 ? "" : "s");
+}
+// HTML for a visible name: letter + Bravura Text accidental (hidden from screen readers)
+function accHTML(acc) {
+  if (acc === 0) return "";
+  return '<span class="acc" aria-hidden="true">' + (acc === 1 ? GLYPH.sharp : GLYPH.flat) + "</span>";
+}
+function nameHTML(n, suffix) {
+  return '<span aria-hidden="true">' + n.letter + "</span>" + accHTML(n.acc) +
+         (suffix ? '<span aria-hidden="true">' + suffix + "</span>" : "") +
+         '<span class="sr-only">' + spokenName(n) + "</span>";
+}
+
+/* ---------- pitches for audio ---------- */
+
+const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
+const LETTER_SEMITONE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+// Tonic triad (MIDI numbers) for the major or minor side of a key.
+// The triad uses only notes from the key signature, so the 3rd and 5th
+// get their sharps/flats from the signature automatically.
+function triadMidi(k, side) {
+  const tonic = k[side];
+  const altered = sigLetters(k);
+  const accFor = (L) => altered.includes(L) ? (k.type === "sharp" ? 1 : -1) : 0;
+
+  const startIdx = LETTERS.indexOf(tonic.letter);
+  // Root between F3 (53) and E4 (64): a comfortable, warm piano register
+  let root = 48 + (((LETTER_SEMITONE[tonic.letter] + tonic.acc) % 12) + 12) % 12;
+  if (root < 53) root += 12;
+
+  const notes = [root];
+  for (const step of [2, 4]) {              // the 3rd and the 5th
+    const L = LETTERS[(startIdx + step) % 7];
+    const pc = ((LETTER_SEMITONE[L] + accFor(L)) % 12 + 12) % 12;
+    const prev = notes[notes.length - 1];
+    let n = prev + (((pc - prev) % 12) + 12) % 12;   // next pitch above prev
+    if (n === prev) n += 12;
+    notes.push(n);
+  }
+  return notes;
+}
+
+/* =====================================================================
+   2. APP STATE
+   ===================================================================== */
+
+const state = {
+  sel: null,          // { slot, sp, ring } — ring is "major" | "sig" | "minor"
+  showMajors: true,
+  showMinors: true,
+  view: "circle",     // "circle" | "list"
+  audio: true,
+  build: null,        // null = show whole signature; number = how many shown so far
+  focus: { ring: "major", slot: 0, sp: 0 },   // keyboard position on the circle
+};
+
+// Remember display choices between visits (this browser only). Wrapped in
+// try/catch because private windows can block storage.
+const STORE_KEY = "cof-trainer-v1";
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
+    for (const k of ["showMajors", "showMinors", "audio"]) if (typeof p[k] === "boolean") state[k] = p[k];
+    if (p.view === "circle" || p.view === "list") state.view = p.view;
+  } catch (e) { /* storage unavailable: use defaults */ }
+}
+function savePrefs() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      showMajors: state.showMajors, showMinors: state.showMinors, view: state.view, audio: state.audio,
+    }));
+  } catch (e) { /* ignore */ }
+}
+
+const selectedKey = () => state.sel ? SLOTS[state.sel.slot][state.sel.sp] : null;
+
+/* =====================================================================
+   3. THE CIRCLE (SVG)
+   ===================================================================== */
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const CX = 300, CY = 300;
+
+// Ring radii (outer edge -> inner edge)
+const RINGS = {
+  major: { outer: 294, inner: 216, size: 27, sizeSplit: 20 },
+  sig:   { outer: 216, inner: 160, size: 18, sizeSplit: 15 },
+  minor: { outer: 160, inner: 86,  size: 20, sizeSplit: 16 },
+};
+const RING_ORDER = ["major", "sig", "minor"];   // outside -> inside
+
+// Point on the circle: angle in degrees, 0 = top, increasing clockwise
+function pt(r, deg) {
+  const a = deg * Math.PI / 180;
+  return [CX + r * Math.sin(a), CY - r * Math.cos(a)];
+}
+// Path for a ring segment between two radii and two angles
+function sectorPath(rOut, rIn, a0, a1) {
+  const [x0, y0] = pt(rOut, a0), [x1, y1] = pt(rOut, a1);
+  const [x2, y2] = pt(rIn, a1),  [x3, y3] = pt(rIn, a0);
+  return `M${x0},${y0} A${rOut},${rOut} 0 0 1 ${x1},${y1} L${x2},${y2} A${rIn},${rIn} 0 0 0 ${x3},${y3} Z`;
+}
+
+// Radial band for one spelling. Enharmonic slots split each ring in two:
+// the sharp spelling on the inner half, the flat spelling on the outer half.
+// (At the bottom of the circle "inner" is higher on screen, so B reads above C-flat.)
+function band(ring, slot, sp) {
+  const R = RINGS[ring];
+  if (SLOTS[slot].length === 1) return [R.outer, R.inner];
+  const mid = (R.outer + R.inner) / 2;
+  return sp === 0 ? [mid, R.inner] : [R.outer, mid];
+}
+
+const segEls = {};   // "ring-slot-sp" -> <g> element
+const segId = (ring, slot, sp) => `${ring}-${slot}-${sp}`;
+
+// Visible label as SVG text: letter + accidental tspan (+ "m" for minors)
+function setLabel(textEl, n, suffix) {
+  textEl.textContent = "";
+  const t1 = document.createElementNS(SVGNS, "tspan");
+  t1.textContent = n.letter;
+  textEl.appendChild(t1);
+  if (n.acc !== 0) {
+    const t2 = document.createElementNS(SVGNS, "tspan");
+    t2.setAttribute("font-family", "Bravura Text");
+    t2.setAttribute("font-weight", "normal");
+    t2.textContent = n.acc === 1 ? GLYPH.sharp : GLYPH.flat;
+    textEl.appendChild(t2);
+  }
+  if (suffix) {
+    const t3 = document.createElementNS(SVGNS, "tspan");
+    t3.textContent = suffix;
+    textEl.appendChild(t3);
+  }
+}
+function setCountLabel(textEl, k) {
+  textEl.textContent = "";
+  const t1 = document.createElementNS(SVGNS, "tspan");
+  t1.textContent = String(k.count);
+  textEl.appendChild(t1);
+  if (k.count > 0) {
+    const t2 = document.createElementNS(SVGNS, "tspan");
+    t2.setAttribute("font-family", "Bravura Text");
+    t2.textContent = k.type === "sharp" ? GLYPH.sharp : GLYPH.flat;
+    textEl.appendChild(t2);
+  }
+}
+
+function buildCircle() {
+  const svg = document.getElementById("circle");
+
+  SLOTS.forEach((keys, slot) => {
+    const a0 = slot * 30 - 15, a1 = slot * 30 + 15;   // each slot spans 30 degrees
+    keys.forEach((k, sp) => {
+      for (const ring of RING_ORDER) {
+        const [rOut, rIn] = band(ring, slot, sp);
+        const split = keys.length > 1;
+
+        const g = document.createElementNS(SVGNS, "g");
+        g.setAttribute("class", "seg r-" + ring);
+        g.setAttribute("role", "button");
+        g.setAttribute("tabindex", "-1");
+        g.dataset.ring = ring; g.dataset.slot = slot; g.dataset.sp = sp;
+
+        const path = document.createElementNS(SVGNS, "path");
+        path.setAttribute("d", sectorPath(rOut, rIn, a0, a1));
+        g.appendChild(path);
+
+        // Label sits in the middle of the band; nudged down so letters look centered
+        const R = RINGS[ring];
+        const size = split ? R.sizeSplit : R.size;
+        const [tx, ty] = pt((rOut + rIn) / 2, slot * 30);
+        const text = document.createElementNS(SVGNS, "text");
+        text.setAttribute("x", tx.toFixed(1));
+        text.setAttribute("y", (ty + size * 0.36).toFixed(1));
+        text.setAttribute("font-size", size);
+        text.setAttribute("aria-hidden", "true");
+        g.appendChild(text);
+
+        g.addEventListener("click", () => {
+          state.focus = { ring, slot, sp };
+          select(slot, sp, ring);
+        });
+        svg.appendChild(g);
+        segEls[segId(ring, slot, sp)] = g;
+      }
+    });
+  });
+
+  // Center: shows the selected key
+  const c = document.createElementNS(SVGNS, "circle");
+  c.setAttribute("cx", CX); c.setAttribute("cy", CY); c.setAttribute("r", 82);
+  c.setAttribute("fill", "var(--bg)");
+  svg.appendChild(c);
+
+  const title = document.createElementNS(SVGNS, "text");
+  title.setAttribute("class", "center-title"); title.setAttribute("id", "center-title");
+  title.setAttribute("x", CX); title.setAttribute("y", CY + 4); title.setAttribute("font-size", 24);
+  title.setAttribute("aria-hidden", "true");
+  svg.appendChild(title);
+
+  const sub = document.createElementNS(SVGNS, "text");
+  sub.setAttribute("class", "center-sub"); sub.setAttribute("id", "center-sub");
+  sub.setAttribute("x", CX); sub.setAttribute("y", CY + 28); sub.setAttribute("font-size", 12);
+  sub.setAttribute("aria-hidden", "true");
+  svg.appendChild(sub);
+
+  svg.addEventListener("keydown", onCircleKey);
+}
+
+// Redraw labels, highlights and accessible names to match the state
+function renderCircle() {
+  const sel = state.sel;
+  SLOTS.forEach((keys, slot) => {
+    keys.forEach((k, sp) => {
+      const inSelectedKey = sel && sel.slot === slot && sel.sp === sp;
+      for (const ring of RING_ORDER) {
+        const g = segEls[segId(ring, slot, sp)];
+        const text = g.querySelector("text");
+        const isSel = inSelectedKey && sel.ring === ring;
+
+        g.classList.toggle("is-selected", !!isSel);
+        g.classList.toggle("is-related", !!inSelectedKey && !isSel);
+        g.setAttribute("aria-pressed", isSel ? "true" : "false");
+
+        // Hidden rings keep their shape; a label reappears for the selected key
+        // so the learner can check their guess.
+        const hidden = (ring === "major" && !state.showMajors) || (ring === "minor" && !state.showMinors);
+        const reveal = !hidden || inSelectedKey;
+
+        if (ring === "major") {
+          if (reveal) setLabel(text, k.major); else text.textContent = "";
+          g.setAttribute("aria-label", reveal
+            ? `${spokenName(k.major)} major, ${spokenCount(k)}`
+            : `Hidden major key, ${spokenCount(k)}`);
+        } else if (ring === "minor") {
+          if (reveal) setLabel(text, k.minor, "m"); else text.textContent = "";
+          g.setAttribute("aria-label", reveal
+            ? `${spokenName(k.minor)} minor, ${spokenCount(k)}`
+            : `Hidden minor key, ${spokenCount(k)}`);
+        } else {
+          setCountLabel(text, k);
+          g.setAttribute("aria-label", k.count === 0 ? "No sharps or flats" : spokenCount(k));
+        }
+      }
+    });
+  });
+
+  // Roving tabindex: only the focused segment is in the Tab order
+  for (const id in segEls) segEls[id].setAttribute("tabindex", "-1");
+  const f = state.focus;
+  segEls[segId(f.ring, f.slot, f.sp)].setAttribute("tabindex", "0");
+
+  // Center text
+  const title = document.getElementById("center-title");
+  const sub = document.getElementById("center-sub");
+  const k = selectedKey();
+  if (!k) {
+    title.textContent = ""; title.setAttribute("font-size", 17);
+    title.textContent = "Choose a key";
+    sub.textContent = "";
+  } else {
+    title.setAttribute("font-size", 24);
+    if (sel.ring === "minor") setLabel(title, k.minor, " minor");
+    else setLabel(title, k.major, " major");
+    sub.textContent = "";
+    const pre = document.createElementNS(SVGNS, "tspan");
+    pre.textContent = sel.ring === "minor" ? "rel. major " : "rel. minor ";
+    sub.appendChild(pre);
+    const n = sel.ring === "minor" ? k.major : k.minor;
+    const nameSpan = document.createElementNS(SVGNS, "tspan");
+    setLabel(nameSpan, n, sel.ring === "minor" ? "" : "m");
+    sub.appendChild(nameSpan);
+  }
+}
+
+/* ---------- keyboard navigation on the circle ---------- */
+
+// All items in one ring, in clockwise order (enharmonic slots give two items)
+function ringItems() {
+  const items = [];
+  SLOTS.forEach((keys, slot) => keys.forEach((k, sp) => items.push({ slot, sp })));
+  return items;
+}
+const ITEMS = ringItems();
+
+function onCircleKey(e) {
+  const f = state.focus;
+  let idx = ITEMS.findIndex(it => it.slot === f.slot && it.sp === f.sp);
+  let ringIdx = RING_ORDER.indexOf(f.ring);
+  let handled = true;
+
+  switch (e.key) {
+    case "ArrowRight": idx = (idx + 1) % ITEMS.length; break;                  // clockwise
+    case "ArrowLeft":  idx = (idx - 1 + ITEMS.length) % ITEMS.length; break;   // counter-clockwise
+    case "ArrowUp":    ringIdx = Math.max(0, ringIdx - 1); break;              // outward
+    case "ArrowDown":  ringIdx = Math.min(2, ringIdx + 1); break;              // inward
+    case "Home":       idx = 0; break;
+    case "End":        idx = ITEMS.length - 1; break;
+    case "Enter":
+    case " ":
+      select(f.slot, f.sp, f.ring);
+      e.preventDefault();
+      return;
+    default: handled = false;
+  }
+  if (!handled) return;
+  e.preventDefault();
+  state.focus = { ring: RING_ORDER[ringIdx], slot: ITEMS[idx].slot, sp: ITEMS[idx].sp };
+  renderCircle();
+  segEls[segId(state.focus.ring, state.focus.slot, state.focus.sp)].focus();
+}
+
+/* =====================================================================
+   4. LIST VIEW (same information, as a table)
+   ===================================================================== */
+
+const tableBtns = {};   // "ring-slot-sp" -> <button>
+
+function buildTable() {
+  const tbody = document.querySelector("#key-table tbody");
+  SLOTS.forEach((keys, slot) => keys.forEach((k, sp) => {
+    const tr = document.createElement("tr");
+    for (const ring of RING_ORDER) {
+      const td = document.createElement(ring === "major" ? "th" : "td");
+      if (ring === "major") td.setAttribute("scope", "row");
+      if (ring === "sig") td.className = "sig";
+      const b = document.createElement("button");
+      b.addEventListener("click", () => {
+        state.focus = { ring, slot, sp };
+        select(slot, sp, ring);
+      });
+      td.appendChild(b);
+      tr.appendChild(td);
+      tableBtns[segId(ring, slot, sp)] = b;
+    }
+    tbody.appendChild(tr);
+  }));
+}
+
+function renderTable() {
+  const sel = state.sel;
+  SLOTS.forEach((keys, slot) => keys.forEach((k, sp) => {
+    const inSel = sel && sel.slot === slot && sel.sp === sp;
+    for (const ring of RING_ORDER) {
+      const b = tableBtns[segId(ring, slot, sp)];
+      b.setAttribute("aria-pressed", inSel && sel.ring === ring ? "true" : "false");
+      const hidden = (ring === "major" && !state.showMajors) || (ring === "minor" && !state.showMinors);
+      if (ring === "sig") {
+        b.innerHTML = k.count === 0
+          ? '<span aria-hidden="true">0</span><span class="sr-only">No sharps or flats</span>'
+          : `<span aria-hidden="true">${k.count}</span>${accHTML(k.type === "sharp" ? 1 : -1)}<span class="sr-only">${spokenCount(k)}</span>`;
+      } else if (hidden && !inSel) {
+        b.innerHTML = '<span aria-hidden="true">· · ·</span><span class="sr-only">Hidden ' + ring + " key</span>";
+      } else if (ring === "major") {
+        b.innerHTML = nameHTML(k.major, "") + '<span class="sr-only"> major</span>';
+      } else {
+        b.innerHTML = nameHTML(k.minor, "m") + '<span class="sr-only"> minor</span>';
+      }
+    }
+  }));
+}
+
+/* =====================================================================
+   5. ORDER OF SHARPS / FLATS
+   ===================================================================== */
+
+function renderOrders() {
+  const k = selectedKey();
+  const shown = k ? (state.build === null ? k.count : state.build) : 0;
+
+  for (const [type, order, elId] of [["sharp", SHARP_ORDER, "order-sharps"], ["flat", FLAT_ORDER, "order-flats"]]) {
+    const ol = document.getElementById(elId);
+    ol.innerHTML = "";
+    order.forEach((L, i) => {
+      const li = document.createElement("li");
+      const active = k && k.type === type && i < shown;
+      if (active) li.classList.add("on");
+      if (active && state.build !== null && i === shown - 1) li.classList.add("newest");
+      li.innerHTML = nameHTML({ letter: L, acc: type === "sharp" ? 1 : -1 }) +
+        (active ? '<span class="sr-only">, in this key signature</span>' : "");
+      ol.appendChild(li);
+    });
+  }
+}
+
+/* =====================================================================
+   6. THE GRAND STAFF
+   Drawn by hand in SVG with Bravura glyphs, so every accidental can be
+   placed, counted and highlighted individually for "Build it".
+   ===================================================================== */
+
+const SP = 12;                   // one staff space, in SVG units
+const STAFF_X0 = 44, STAFF_X1 = 262;
+const TREBLE_TOP = 46;           // y of the treble staff's top line
+const BASS_TOP = TREBLE_TOP + 4 * SP + 7 * SP;   // a 7-space gap between the staves
+const MUSIC_SIZE = 4 * SP;       // Bravura is drawn so 1 em = staff height
+
+// y position of a pitch on a staff, counting diatonic steps from the middle line.
+// Treble middle line = B4, bass middle line = D3.
+function stepNumber(letter, octave) { return LETTERS.indexOf(letter) + 7 * octave; }
+function pitchY(staff, letter, octave) {
+  const middleY = (staff === "treble" ? TREBLE_TOP : BASS_TOP) + 2 * SP;
+  const middleStep = staff === "treble" ? stepNumber("B", 4) : stepNumber("D", 3);
+  return middleY - (stepNumber(letter, octave) - middleStep) * (SP / 2);
+}
+
+// Standard key-signature positions (the same shape on both staves,
+// the bass one sitting a 7th lower on the page)
+const SIG_POS = {
+  sharp: { treble: [["F",5],["C",5],["G",5],["D",5],["A",4],["E",5],["B",4]],
+           bass:   [["F",3],["C",3],["G",3],["D",3],["A",2],["E",3],["B",2]] },
+  flat:  { treble: [["B",4],["E",5],["A",4],["D",5],["G",4],["C",5],["F",4]],
+           bass:   [["B",2],["E",3],["A",2],["D",3],["G",2],["C",3],["F",2]] },
+};
+
+function svgEl(name, attrs, text) {
+  const el = document.createElementNS(SVGNS, name);
+  for (const a in attrs) el.setAttribute(a, attrs[a]);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function renderStaff() {
+  const svg = document.getElementById("staff");
+  svg.textContent = "";
+
+  // Five lines per staff
+  for (const top of [TREBLE_TOP, BASS_TOP]) {
+    for (let i = 0; i < 5; i++) {
+      svg.appendChild(svgEl("line", { class: "staff-line", x1: STAFF_X0, x2: STAFF_X1, y1: top + i * SP, y2: top + i * SP }));
+    }
+  }
+  const bottom = BASS_TOP + 4 * SP;
+
+  // System line joining the two staves, and the brace in front of it.
+  // The brace glyph is one staff tall, so it's stretched to cover both.
+  svg.appendChild(svgEl("line", { class: "system-line", x1: STAFF_X0, x2: STAFF_X0, y1: TREBLE_TOP, y2: bottom }));
+  const stretch = (bottom - TREBLE_TOP) / MUSIC_SIZE;
+  svg.appendChild(svgEl("text", {
+    class: "glyph", "font-size": MUSIC_SIZE, "text-anchor": "end",
+    transform: `translate(${STAFF_X0 - 4} ${bottom}) scale(1 ${stretch})`, x: 0, y: 0,
+  }, GLYPH.brace));
+
+  // Clefs: SMuFL places the G clef's origin on the G line (2nd line up)
+  // and the F clef's origin on the F line (4th line up)
+  const clefX = STAFF_X0 + 8;
+  svg.appendChild(svgEl("text", { class: "glyph", "font-size": MUSIC_SIZE, x: clefX, y: TREBLE_TOP + 3 * SP }, GLYPH.gClef));
+  svg.appendChild(svgEl("text", { class: "glyph", "font-size": MUSIC_SIZE, x: clefX, y: BASS_TOP + SP }, GLYPH.fClef));
+
+  // Key signature
+  const k = selectedKey();
+  const desc = document.getElementById("staff-desc");
+  if (!k || k.count === 0) {
+    desc.textContent = "Grand staff with treble and bass clefs and no key signature: no sharps or flats.";
+    return;
+  }
+  const shown = state.build === null ? k.count : state.build;
+  const step = k.type === "sharp" ? 1.25 * SP : 1.1 * SP;   // spacing between accidentals
+  const sigX = clefX + 3.6 * SP;
+  const glyph = k.type === "sharp" ? GLYPH.sharp : GLYPH.flat;
+
+  for (let i = 0; i < shown; i++) {
+    const newest = state.build !== null && i === shown - 1;
+    for (const staff of ["treble", "bass"]) {
+      const [L, oct] = SIG_POS[k.type][staff][i];
+      svg.appendChild(svgEl("text", {
+        class: "glyph" + (newest ? " newest" : ""), "font-size": MUSIC_SIZE,
+        x: (sigX + i * step).toFixed(1), y: pitchY(staff, L, oct),
+      }, glyph));
+    }
+  }
+
+  const names = sigLetters(k).slice(0, shown).map(L => L + " " + k.type).join(", ");
+  desc.textContent = `Grand staff with treble and bass clefs. Key signature showing ${shown} ` +
+    `${k.type}${shown === 1 ? "" : "s"} on each staff: ${names}.` +
+    (shown < k.count ? ` ${k.count - shown} more to add.` : "");
+}
+
+function renderCaption() {
+  const cap = document.getElementById("staff-caption");
+  const k = selectedKey();
+  if (!k) { cap.innerHTML = 'Select a key<span class="sub">The grand staff will show its key signature</span>'; return; }
+  const count = spokenCount(k);   // e.g. "2 sharps"
+  const r = state.sel.ring;
+  if (r === "minor") {
+    cap.innerHTML = `${nameHTML(k.minor)} minor<span class="sub">relative of ${nameHTML(k.major)} major · ${count}</span>`;
+  } else if (r === "major") {
+    cap.innerHTML = `${nameHTML(k.major)} major<span class="sub">relative minor ${nameHTML(k.minor)} minor · ${count}</span>`;
+  } else {
+    cap.innerHTML = `${count[0].toUpperCase() + count.slice(1)}<span class="sub">${nameHTML(k.major)} major · ${nameHTML(k.minor)} minor</span>`;
+  }
+}
+
+/* ---------- "Build it": add the accidentals one at a time ---------- */
+
+function renderBuild() {
+  const k = selectedKey();
+  const btn = document.getElementById("btn-build");
+  const all = document.getElementById("btn-showall");
+  const status = document.getElementById("build-status");
+
+  if (!k || k.count === 0) {
+    btn.disabled = true;
+    btn.textContent = "Build it step by step";
+    all.hidden = true;
+    status.textContent = k ? "Nothing to build: this key has no sharps or flats." : "";
+    return;
+  }
+  btn.disabled = false;
+  const letters = sigLetters(k);
+  if (state.build === null) {
+    btn.textContent = "Build it step by step";
+    all.hidden = true;
+    status.textContent = "";
+  } else if (state.build < k.count) {
+    const next = { letter: letters[state.build], acc: k.type === "sharp" ? 1 : -1 };
+    btn.innerHTML = `Add next: ${nameHTML(next)}`;
+    all.hidden = false;
+    status.textContent = `${state.build} of ${k.count}`;
+  } else {
+    btn.textContent = "Build it again";
+    all.hidden = true;
+    status.textContent = `${k.count} of ${k.count}: complete`;
+  }
+}
+
+function onBuild() {
+  const k = selectedKey();
+  if (!k || k.count === 0) return;
+  if (state.build === null || state.build >= k.count) state.build = 1;
+  else state.build += 1;
+  const added = sigLetters(k)[state.build - 1];
+  announce(`Added ${added} ${k.type}, ${state.build} of ${k.count}.`);
+  renderSignatureParts();
+}
+
+function onShowAll() {
+  state.build = null;
+  renderSignatureParts();
+  document.getElementById("btn-build").focus();   // the Show all button just disappeared
+}
+
+/* =====================================================================
+   7. AUDIO (Tone.js + Salamander Grand Piano)
+   Loaded lazily on the first selection: browsers only allow sound to
+   start after the user has clicked or pressed a key.
+   ===================================================================== */
+
+let piano = null, pianoLoading = null;
+
+function getPiano() {
+  if (piano) return Promise.resolve(piano);
+  if (pianoLoading) return pianoLoading;
+  if (typeof Tone === "undefined") return Promise.reject(new Error("Tone.js not loaded"));
+  pianoLoading = new Promise((resolve, reject) => {
+    const s = new Tone.Sampler({
+      urls: {
+        C2: "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3", A2: "A2.mp3",
+        C3: "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3", A3: "A3.mp3",
+        C4: "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3", A4: "A4.mp3",
+        C5: "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3", A5: "A5.mp3",
+      },
+      release: 1.2,
+      baseUrl: "https://tonejs.github.io/audio/salamander/",
+      onload: () => { piano = s; resolve(s); },
+      onerror: (err) => { pianoLoading = null; reject(err); },
+    }).toDestination();
+  });
+  return pianoLoading;
+}
+
+async function playTriad(k, side) {
+  if (!state.audio) return;
+  try {
+    await Tone.start();
+    const p = await getPiano();
+    if (!state.audio) return;
+    const now = Tone.now();
+    // A gentle roll (25 ms apart) so the chord sounds like a hand on a piano
+    triadMidi(k, side).forEach((m, i) => {
+      p.triggerAttackRelease(Tone.Frequency(m, "midi").toNote(), 1.8, now + i * 0.025, 0.7);
+    });
+  } catch (e) {
+    console.warn("Audio unavailable:", e);
+  }
+}
+
+/* =====================================================================
+   8. SELECTION + RENDER
+   ===================================================================== */
+
+function announce(msg) {
+  const a = document.getElementById("announcer");
+  a.textContent = "";
+  // a tiny delay makes screen readers re-read even if the text repeats
+  setTimeout(() => { a.textContent = msg; }, 30);
+}
+
+function select(slot, sp, ring) {
+  state.sel = { slot, sp, ring };
+  state.build = null;
+  const k = selectedKey();
+  renderAll();
+
+  const sigNames = sigLetters(k).map(L => L + " " + k.type).join(", ");
+  const sig = k.count === 0 ? "No sharps or flats." : `${spokenCount(k)}: ${sigNames}.`;
+  if (ring === "minor") announce(`${spokenName(k.minor)} minor. ${sig} Relative major: ${spokenName(k.major)} major.`);
+  else if (ring === "major") announce(`${spokenName(k.major)} major. ${sig} Relative minor: ${spokenName(k.minor)} minor.`);
+  else announce(`${sig} ${spokenName(k.major)} major and ${spokenName(k.minor)} minor.`);
+
+  playTriad(k, ring === "minor" ? "minor" : "major");
+}
+
+function renderSignatureParts() {
+  renderOrders();
+  renderStaff();
+  renderBuild();
+}
+
+function renderToggles() {
+  const set = (id, on) => document.getElementById(id).setAttribute("aria-pressed", on ? "true" : "false");
+  set("tg-major", state.showMajors);
+  set("tg-minor", state.showMinors);
+  set("tg-audio", state.audio);
+  set("vw-circle", state.view === "circle");
+  set("vw-list", state.view === "list");
+  document.getElementById("layout").classList.toggle("show-list", state.view === "list");
+}
+
+function renderAll() {
+  renderToggles();
+  renderCircle();
+  renderTable();
+  renderCaption();
+  renderSignatureParts();
+}
+
+/* =====================================================================
+   9. STARTUP
+   ===================================================================== */
+
+function wireControls() {
+  document.getElementById("tg-major").addEventListener("click", () => { state.showMajors = !state.showMajors; savePrefs(); renderAll(); });
+  document.getElementById("tg-minor").addEventListener("click", () => { state.showMinors = !state.showMinors; savePrefs(); renderAll(); });
+  document.getElementById("tg-audio").addEventListener("click", () => { state.audio = !state.audio; savePrefs(); renderToggles(); });
+  document.getElementById("vw-circle").addEventListener("click", () => { state.view = "circle"; savePrefs(); renderToggles(); });
+  document.getElementById("vw-list").addEventListener("click", () => { state.view = "list"; savePrefs(); renderToggles(); });
+  document.getElementById("btn-build").addEventListener("click", onBuild);
+  document.getElementById("btn-showall").addEventListener("click", onShowAll);
+}
+
+// Warn (instead of silently showing empty boxes) if the music fonts can't load
+function checkFonts() {
+  if (!document.fonts || !document.fonts.load) return;
+  Promise.all([document.fonts.load('48px "Bravura"', GLYPH.gClef), document.fonts.load('16px "Bravura Text"', GLYPH.sharp)])
+    .then(([a, b]) => { if (!a.length || !b.length) throw new Error("font missing"); })
+    .catch(() => document.getElementById("font-warning").classList.add("show"));
+}
+
+loadPrefs();
+buildCircle();
+buildTable();
+wireControls();
+renderAll();
+checkFonts();
+</script>
+</body>
+</html>
